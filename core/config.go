@@ -424,12 +424,7 @@ func (c *Config) IsActiveHostname(host string) bool {
 	if host[len(host)-1:] == "." {
 		host = host[:len(host)-1]
 	}
-	for _, h := range c.activeHostnames {
-		if h == host {
-			return true
-		}
-	}
-	return false
+	return checkActiveFuzzy(host, c.activeHostnames)
 }
 
 func (c *Config) AddPhishlet(site string, pl *Phishlet) {

