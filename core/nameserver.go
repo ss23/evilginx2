@@ -64,6 +64,7 @@ func (n *Nameserver) ClearTXT() {
 func (n *Nameserver) handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
+	m.Authoritative = true
 
 	if n.cfg.baseDomain == "" || n.cfg.serverIP == "" {
 		return
