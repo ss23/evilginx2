@@ -14,7 +14,7 @@ type Nameserver struct {
 	srv    *dns.Server
 	cfg    *Config
 	serial uint32
-	txt    map[string]TXTField
+	txt    map[string][]TXTField
 }
 
 type TXTField struct {
@@ -28,7 +28,7 @@ func NewNameserver(cfg *Config) (*Nameserver, error) {
 		serial: uint32(time.Now().Unix()),
 		cfg:    cfg,
 	}
-	n.txt = make(map[string]TXTField)
+	n.txt = make(map[string][]TXTField)
 
 	n.Reset()
 
@@ -54,11 +54,11 @@ func (n *Nameserver) AddTXT(fqdn string, value string, ttl int) {
 		value: value,
 		ttl:   ttl,
 	}
-	n.txt[fqdn] = txt
+	n.txt[fqdn] = append(n.txt[fqdn], txt)
 }
 
 func (n *Nameserver) ClearTXT() {
-	n.txt = make(map[string]TXTField)
+	n.txt = make(map[string][]TXTField)
 }
 
 func (n *Nameserver) handleRequest(w dns.ResponseWriter, r *dns.Msg) {
@@ -103,14 +103,16 @@ func (n *Nameserver) handleRequest(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	case dns.TypeTXT:
 		log.Debug("DNS TXT: " + strings.ToLower(r.Question[0].Name))
-		txt, ok := n.txt[strings.ToLower(m.Question[0].Name)]
+		txts, ok := n.txt[strings.ToLower(m.Question[0].Name)]
 
 		if ok {
-			rr := &dns.TXT{
-				Hdr: dns.RR_Header{Name: m.Question[0].Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: uint32(txt.ttl)},
-				Txt: []string{txt.value},
+			for _, txt := range txts {
+				rr := &dns.TXT{
+					Hdr: dns.RR_Header{Name: m.Question[0].Name, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: uint32(txt.ttl)},
+					Txt: []string{txt.value},
+				}
+				m.Answer = append(m.Answer, rr)
 			}
-			m.Answer = append(m.Answer, rr)
 		}
 	}
 	w.WriteMsg(m)
