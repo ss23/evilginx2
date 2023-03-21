@@ -20,12 +20,34 @@ import (
 	"github.com/go-acme/lego/v4/certcrypto"
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge"
+	"github.com/go-acme/lego/v4/challenge/dns01"
 	"github.com/go-acme/lego/v4/lego"
 	legolog "github.com/go-acme/lego/v4/log"
 	"github.com/go-acme/lego/v4/registration"
 )
 
 const HOSTS_DIR = "hosts"
+
+type Evilginx2DNSProvider struct {
+	ns	*Nameserver
+}
+
+func NewEvilginx2DNSProvider(ns *Nameserver) (*Evilginx2DNSProvider, error) {
+	return &Evilginx2DNSProvider{ns: ns}, nil
+}
+
+func (d *Evilginx2DNSProvider) Present(domain, token, keyAuth string) error {
+    fqdn, value := dns01.GetRecord(domain, keyAuth)
+    fmt.Printf("Setting DNS for %v to %v", fqdn, value)
+    d.ns.AddTXT(fqdn, value, 60)
+    return nil
+}
+
+func (d *Evilginx2DNSProvider) CleanUp(domain, token, keyAuth string) error {
+    // clean up any state you created in Present, like removing the TXT record
+    d.ns.ClearTXT()
+    return nil
+}
 
 type CertDb struct {
 	PrivateKey    *rsa.PrivateKey
@@ -215,7 +237,7 @@ func (d *CertDb) obtainHostnameCertificate(hostname string) error {
 		return err
 	}
 	crt_dir := filepath.Join(d.dataDir, HOSTS_DIR)
-
+	// TODO: Determine what the wildcard DNS should be
 	domains := []string{hostname}
 	cert_res, err := d.registerCertificate(domains)
 	if err != nil {
@@ -334,10 +356,14 @@ func (d *CertDb) registerCertificate(domains []string) (*certificate.Resource, e
 		return nil, err
 	}
 
-	d.httpChallenge = &HTTPChallenge{crt_db: d}
+	evilginx2DNS, err := NewEvilginx2DNSProvider(d.ns)
+	if err != nil {
+	    return nil, err
+	}
 
-	d.client.Challenge.SetHTTP01Provider(d.httpChallenge)
+	d.client.Challenge.SetDNS01Provider(evilginx2DNS)
 	d.client.Challenge.Remove(challenge.TLSALPN01)
+	d.client.Challenge.Remove(challenge.HTTP01)
 
 	reg, err := d.client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
 	if err != nil {
