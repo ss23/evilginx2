@@ -1,6 +1,7 @@
 package core
 
 import (
+	"strings"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -237,8 +238,9 @@ func (d *CertDb) obtainHostnameCertificate(hostname string) error {
 		return err
 	}
 	crt_dir := filepath.Join(d.dataDir, HOSTS_DIR)
-	// TODO: Determine what the wildcard DNS should be
-	domains := []string{hostname}
+	// Always request a wildcard hostname too
+	hostnamePrefix := hostname[strings.Index(hostname, "."):]
+	domains := []string{hostnamePrefix, "*." + hostnamePrefix}
 	cert_res, err := d.registerCertificate(domains)
 	if err != nil {
 		return err
