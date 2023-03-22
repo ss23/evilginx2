@@ -1048,7 +1048,7 @@ func (p *HttpProxy) patchUrls(pl *Phishlet, body []byte, c_type int) []byte {
 			u, err := url.Parse(s_url)
 			if err == nil {
 				for _, r := range replacers {
-					if r.Matches(u.Host, false) {
+					if r.Matches(strings.ToLower(u.Host), false) {
 						newHost := r.Apply(u.Host)
 						s_url = strings.Replace(s_url, u.Host, newHost, 1)
 						break
